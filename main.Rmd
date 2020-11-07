@@ -1,0 +1,131 @@
+---
+title: "R Notebook"
+output: rmarkdown::github_document
+---
+
+Required libraries
+
+```{r}
+
+library(readxl)
+library(readr)
+library(knitr)
+library(tibble)
+library(tidyr)
+library(dplyr)
+
+```
+
+
+
+Tidy both tables
+
+```{r}
+# Read Table 1, unit is Decare (1 Decare = 1k m^2)
+sown.area <- read_excel("data.xls", range = "R6C1:R25C7")
+t1.col.names <- read_excel("data.xls", range = "R3C2:R4C7")
+colnames(sown.area) <- c("Year",t1.col.names[1,])
+
+# Read Table 2, unit is Tonne
+production <- read_excel("data.xls", range = "R27C1:R46C7")
+t2.col.names <- read_excel("data.xls", range = "R3C2:R4C7")
+colnames(production) <- c("Year",t1.col.names[1,])
+
+# Tidy Table 1
+tidy.sown.area <- sown.area %>% gather(Type, Area, `Wheat`:`Sugar beets`)
+tidy.sown.area
+
+
+# Tidy Table 2
+
+tidy.production <- production %>% gather(Type, Tonnes, Wheat:`Sugar beets`)
+tidy.production
+```
+
+
+
+Using `merge` merge the to tables into one. Table `merged` has 4 columns: Year, Type, Area, Tonnes
+
+```{r}
+merged <- merge(tidy.sown.area, tidy.production)
+merged
+```
+
+
+
+Add column `efficiency` to `merged`. `efficiency` is the amount of production per decare
+
+```{r}
+merged[,5] <- c(merged$Tonnes / merged$Area)
+colnames(merged)[5] <- c("Efficiency")
+merged
+```
+
+
+
+Scale `efficiency` using *normalization*
+
+```{r}
+rng <- merged[,5, drop = F] %>% apply(2, range)
+rng <- rbind(rng, rng[2,] - rng[1,] )
+rownames(rng) <- c("Min", "Max", "Range")
+rng
+```
+
+
+```{r}
+scaled <- cbind(
+  merged %>% select(-Efficiency),
+  merged %>% select(Efficiency) %>% scale(center = rng["Min",], scale = rng["Range", ])
+)
+scaled
+# merged[,5, drop=F] %>% apply(2, range)
+```
+
+
+
+Discretize `efficiency` into 3 bins
+1. low, medium, high
+
+```{r}
+discretized.range <- cut(merged$Efficiency, 3, labels = c("Low", "Medium", "High"))
+range.table <- table(discretized.range)
+barplot(range.table)
+range.report <- tibble(Range = names(range.table), Count = range.table)
+range.report
+```
+
+2. at breakpoints: (-0.01, 0.04, 0.10, 1.01)
+
+```{r}
+discretized.break <- cut(merged$Efficiency, breaks = c(-0.01, 0.04, 0.10, 1.01))
+break.table <- table(discretized.break)
+barplot(break.table)
+break.report <- tibble(Break = names(break.table), Count = break.table)
+break.report
+```
+
+
+
+Display a table to show how many times each product type achieved each efficiency level
+##             
+##              low medium high
+##   Barley      18      0    0
+##   Cotton       4     14    0
+##   Maize        0     11    7
+##   SugarBeets   0      0   18
+##   Sunflower   18      0    0
+##   Wheat       18      0    0
+
+```{r}
+# type.efficiency.table <- tibble(Type = colnames(sown.area)[-1])
+label.appended <- merged %>% cbind(discretized.range)
+colnames(label.appended)[ncol(label.appended)] <- c("Level")
+label.appended
+type.level.tibble <- label.appended %>% select(Type, Level)
+type.level.tibble <- type.level.tibble %>% group_by(Level)
+
+```
+
+
+
